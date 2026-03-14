@@ -7,10 +7,6 @@ The dashboard helps hospitals monitor operational performance and make data-driv
 
 ---
 
-## Dashboard Preview
-
-![Healthcare KPI Dashboard](dashboard.png)
-
 ## Tools & Technologies
 - SQL
 - Power BI
