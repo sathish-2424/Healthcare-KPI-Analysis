@@ -383,7 +383,12 @@ def data_tab(df: pd.DataFrame, full: pd.DataFrame) -> None:
 
 def main() -> None:
     st.title("Healthcare KPI Analysis")
-    st.caption("Interactive operational and financial analysis from healthcare.csv")
+    st.caption(
+        "An interactive healthcare KPI dashboard for monitoring hospital performance, "
+        "patient trends, and revenue insights using real-world healthcare data. "
+        "Use the filters and visualizations to track key indicators, analyze patient "
+        "demographics, and identify opportunities to improve operational efficiency."
+    )
 
     try:
         df = load_data()
