@@ -1,185 +1,99 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
-# ---------------------------
-# Page Config
-# ---------------------------
+# Page configuration
 st.set_page_config(page_title="Healthcare KPI Dashboard", layout="wide")
 
-st.title("🏥 Healthcare KPI Analysis")
-
-# ---------------------------
 # Load Data
-# ---------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("healthcare.csv")
-    df.columns = df.columns.str.strip()  # clean column names
+    df = pd.read_csv('healthcare.csv')
+    # Convert date columns
+    df['Date of Admission'] = pd.to_datetime(df['Date of Admission'])
+    df['Discharge Date'] = pd.to_datetime(df['Discharge Date'])
+    # Calculate Length of Stay
+    df['Length of Stay'] = (df['Discharge Date'] - df['Date of Admission']).dt.days
+    # Extract Month/Year for time series
+    df['MonthYear'] = df['Date of Admission'].dt.to_period('M').dt.to_timestamp()
     return df
 
-df = load_data()
+try:
+    df = load_data()
 
-# ---------------------------
-# Data Preprocessing
-# ---------------------------
-# Convert date columns
-df["Date of Admission"] = pd.to_datetime(df["Date of Admission"], errors='coerce')
-df["Discharge Date"] = pd.to_datetime(df["Discharge Date"], errors='coerce')
+    # --- SIDEBAR FILTERS ---
+    st.sidebar.header("Dashboard Filters")
+    
+    hospitals = st.sidebar.multiselect("Select Hospital", options=df['Hospital'].unique(), default=df['Hospital'].unique()[:3])
+    gender = st.sidebar.multiselect("Select Gender", options=df['Gender'].unique(), default=df['Gender'].unique())
+    insurance = st.sidebar.multiselect("Select Insurance", options=df['Insurance Provider'].unique(), default=df['Insurance Provider'].unique())
 
-# Create Length of Stay (LOS)
-df["Length of Stay"] = (df["Discharge Date"] - df["Date of Admission"]).dt.days
+    # Apply filters
+    filtered_df = df[
+        (df['Hospital'].isin(hospitals)) &
+        (df['Gender'].isin(gender)) &
+        (df['Insurance Provider'].isin(insurance))
+    ]
 
-# Drop null important values
-df = df.dropna(subset=["Billing Amount", "Date of Admission"])
+    # --- MAIN TITLE ---
+    st.title("🏥 Healthcare KPI Dashboard")
+    st.markdown("--- ")
 
-# ---------------------------
-# Sidebar Filters
-# ---------------------------
-st.sidebar.header("Filters")
+    # --- KPI METRICS ---
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_revenue = filtered_df['Billing Amount'].sum()
+    total_patients = len(filtered_df)
+    avg_billing = filtered_df['Billing Amount'].mean()
+    avg_los = filtered_df['Length of Stay'].mean()
 
-hospital = st.sidebar.multiselect(
-    "Select Hospital",
-    options=df["Hospital"].dropna().unique(),
-    default=df["Hospital"].dropna().unique()
-)
+    col1.metric("Total Revenue", f"${total_revenue:,.2f}")
+    col2.metric("Total Patients", f"{total_patients:,}")
+    col3.metric("Avg Billing", f"${avg_billing:,.2f}")
+    col4.metric("Avg Length of Stay", f"{avg_los:.2f} Days")
 
-gender = st.sidebar.multiselect(
-    "Select Gender",
-    options=df["Gender"].dropna().unique(),
-    default=df["Gender"].dropna().unique()
-)
+    st.markdown("--- ")
 
-insurance = st.sidebar.multiselect(
-    "Insurance Provider",
-    options=df["Insurance Provider"].dropna().unique(),
-    default=df["Insurance Provider"].dropna().unique()
-)
+    # --- VISUALIZATIONS ---
+    row1_col1, row1_col2 = st.columns(2)
 
-# Apply filters
-df_filtered = df[
-    (df["Hospital"].isin(hospital)) &
-    (df["Gender"].isin(gender)) &
-    (df["Insurance Provider"].isin(insurance))
-].copy()
+    with row1_col1:
+        st.subheader("Revenue by Age Group")
+        filtered_df['Age Group'] = pd.cut(filtered_df['Age'], bins=[0, 18, 35, 50, 65, 100], labels=['0-18', '19-35', '36-50', '51-65', '65+'])
+        age_revenue = filtered_df.groupby('Age Group')['Billing Amount'].sum().reset_index()
+        fig_age = px.bar(age_revenue, x='Age Group', y='Billing Amount', color='Age Group', template='plotly_white')
+        st.plotly_chart(fig_age, use_container_width=True)
 
-# ---------------------------
-# KPI Metrics
-# ---------------------------
-total_revenue = df_filtered["Billing Amount"].sum()
-total_patients = df_filtered.shape[0]
-avg_billing = df_filtered["Billing Amount"].mean()
-avg_los = df_filtered["Length of Stay"].mean()
+    with row1_col2:
+        st.subheader("Admission Type Distribution")
+        fig_adm = px.pie(filtered_df, names='Admission Type', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
+        st.plotly_chart(fig_adm, use_container_width=True)
 
-col1, col2, col3, col4 = st.columns(4)
+    row2_col1, row2_col2 = st.columns(2)
 
-col1.metric("💰 Total Revenue", f"{total_revenue/1e9:.2f} bn")
-col2.metric("👥 Total Patients", f"{total_patients/1000:.0f}K")
-col3.metric("📊 Avg Billing", f"{avg_billing:.2f}")
-col4.metric("🛏 Avg Length of Stay", f"{avg_los:.2f} days")
+    with row2_col1:
+        st.subheader("Hospital-wise Billing Performance")
+        hosp_billing = filtered_df.groupby('Hospital')['Billing Amount'].sum().sort_values(ascending=False).head(10).reset_index()
+        fig_hosp = px.bar(hosp_billing, y='Hospital', x='Billing Amount', orientation='h', template='plotly_dark')
+        st.plotly_chart(fig_hosp, use_container_width=True)
 
-# ---------------------------
-# 📈 Monthly Revenue Trend
-# ---------------------------
-st.subheader("📈 Monthly Revenue Trend")
+    with row2_col2:
+        st.subheader("Medical Condition Analysis")
+        cond_counts = filtered_df['Medical Condition'].value_counts().reset_index()
+        fig_cond = px.funnel(cond_counts, x='count', y='Medical Condition')
+        st.plotly_chart(fig_cond, use_container_width=True)
 
-df_filtered["YearMonth"] = df_filtered["Date of Admission"].dt.to_period("M").astype(str)
+    # --- TIME SERIES ANALYSIS ---
+    st.subheader("Monthly Revenue Trends & Moving Average")
+    monthly_revenue = filtered_df.groupby('MonthYear')['Billing Amount'].sum().reset_index()
+    monthly_revenue['Moving Average'] = monthly_revenue['Billing Amount'].rolling(window=3).mean()
 
-monthly_revenue = (
-    df_filtered.groupby("YearMonth")["Billing Amount"]
-    .sum()
-    .reset_index()
-    .sort_values("YearMonth")
-)
+    fig_trend = go.Figure()
+    fig_trend.add_trace(go.Scatter(x=monthly_revenue['MonthYear'], y=monthly_revenue['Billing Amount'], name='Monthly Revenue', line=dict(color='firebrick', width=4)))
+    fig_trend.add_trace(go.Scatter(x=monthly_revenue['MonthYear'], y=monthly_revenue['Moving Average'], name='3-Month Moving Avg', line=dict(color='royalblue', width=4, dash='dash')))
+    fig_trend.update_layout(template='plotly_white', xaxis_title='Date', yaxis_title='Revenue ($)')
+    st.plotly_chart(fig_trend, use_container_width=True)
 
-# Moving Average
-monthly_revenue["MA_3"] = monthly_revenue["Billing Amount"].rolling(3).mean()
-
-fig_ts = px.line(
-    monthly_revenue,
-    x="YearMonth",
-    y=["Billing Amount", "MA_3"],
-    title="Revenue Trend with Moving Average",
-    markers=True
-)
-
-st.plotly_chart(fig_ts, use_container_width=True)
-
-# ---------------------------
-# Charts Row 1
-# ---------------------------
-col1, col2, col3 = st.columns(3)
-
-# Age Group
-age_bins = [0, 20, 40, 60, 100]
-labels = ["Below 20", "20-40", "41-60", "60+"]
-
-df_filtered["Age Group"] = pd.cut(df_filtered["Age"], bins=age_bins, labels=labels)
-
-age_rev = df_filtered.groupby("Age Group")["Billing Amount"].sum().reset_index()
-
-fig1 = px.pie(age_rev, names="Age Group", values="Billing Amount", title="Revenue by Age Category")
-col1.plotly_chart(fig1, use_container_width=True)
-
-# Admission Type
-admission = df_filtered["Admission Type"].value_counts().reset_index()
-admission.columns = ["Admission Type", "Count"]
-
-fig2 = px.pie(admission, names="Admission Type", values="Count", title="Admission Type Distribution")
-col2.plotly_chart(fig2, use_container_width=True)
-
-# Hospital Billing
-hospital_bill = df_filtered.groupby("Hospital")["Billing Amount"].sum().reset_index()
-
-fig3 = px.bar(
-    hospital_bill.sort_values(by="Billing Amount", ascending=False).head(5),
-    x="Billing Amount",
-    y="Hospital",
-    orientation='h',
-    title="Top Hospitals by Billing"
-)
-col3.plotly_chart(fig3, use_container_width=True)
-
-# ---------------------------
-# Charts Row 2
-# ---------------------------
-col1, col2 = st.columns(2)
-
-# Doctor Billing
-doctor_bill = df_filtered.groupby("Doctor")["Billing Amount"].sum().reset_index()
-
-fig4 = px.bar(
-    doctor_bill.sort_values(by="Billing Amount", ascending=False).head(5),
-    x="Billing Amount",
-    y="Doctor",
-    orientation='h',
-    title="Top Doctors by Billing"
-)
-col1.plotly_chart(fig4, use_container_width=True)
-
-# Medical Condition
-condition_bill = df_filtered.groupby("Medical Condition")["Billing Amount"].sum().reset_index()
-
-fig5 = px.bar(
-    condition_bill.sort_values(by="Billing Amount", ascending=False),
-    x="Billing Amount",
-    y="Medical Condition",
-    orientation='h',
-    title="Billing by Medical Condition"
-)
-col2.plotly_chart(fig5, use_container_width=True)
-
-# ---------------------------
-# Insights Section
-# ---------------------------
-st.subheader("📌 Key Insights")
-
-top_age = age_rev.sort_values(by="Billing Amount", ascending=False).iloc[0]["Age Group"]
-top_condition = condition_bill.sort_values(by="Billing Amount", ascending=False).iloc[0]["Medical Condition"]
-top_hospital = hospital_bill.sort_values(by="Billing Amount", ascending=False).iloc[0]["Hospital"]
-
-st.write(f"• Highest revenue comes from **{top_age}** age group")
-st.write(f"• Top contributing medical condition is **{top_condition}**")
-st.write(f"• Top performing hospital is **{top_hospital}**")
-st.write("• Revenue trends show monthly variation and patterns")
-st.write("• Chronic diseases contribute significantly to revenue")
+except FileNotFoundError:
+    st.error("Please make sure 'healthcare.csv' is in the same directory as the script.")
