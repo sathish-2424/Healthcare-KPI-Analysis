@@ -30,6 +30,7 @@ def load_data() -> pd.DataFrame:
         df["Discharge Date"] - df["Date of Admission"]
     ).dt.days.clip(lower=0)
     df["Month"] = df["Date of Admission"].dt.to_period("M").dt.to_timestamp()
+    df["Year"] = df["Date of Admission"].dt.year
     df["Age Category"] = pd.cut(
         df["Age"],
         bins=AGE_BINS,
@@ -143,38 +144,33 @@ def show_kpis(df: pd.DataFrame) -> None:
 
 
 def revenue_trend_chart(df: pd.DataFrame) -> None:
-    monthly_revenue = (
-        df.groupby("Month", as_index=False)["Billing Amount"].sum().sort_values("Month")
+    yearly_revenue = (
+        df.groupby("Year", as_index=False)["Billing Amount"].sum().sort_values("Year")
     )
-    monthly_revenue["3-Month Moving Average"] = monthly_revenue[
-        "Billing Amount"
-    ].rolling(window=3, min_periods=1).mean()
 
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=monthly_revenue["Month"],
-            y=monthly_revenue["Billing Amount"],
-            mode="lines+markers",
-            name="Monthly Revenue",
-            line={"color": "#0f766e", "width": 3},
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=monthly_revenue["Month"],
-            y=monthly_revenue["3-Month Moving Average"],
-            mode="lines",
-            name="3-Month Moving Average",
-            line={"color": "#dc2626", "width": 3, "dash": "dash"},
+            x=yearly_revenue["Year"],
+            y=yearly_revenue["Billing Amount"],
+            mode="lines+markers+text",
+            name="Yearly Revenue",
+            line={"color": "#f59e0b", "width": 3},
+            marker={"size": 12, "color": "#f59e0b"},
+            text=yearly_revenue["Billing Amount"].apply(lambda x: f"{x:,.0f}"),
+            textposition="top center",
+            textfont={"size": 11},
+            hovertemplate="<b>Year: %{x}</b><br>Revenue: $%{y:,.0f}<extra></extra>",
         )
     )
     fig.update_layout(
         template="plotly_white",
-        xaxis_title="Admission Month",
+        title="Admission Date",
+        xaxis_title="",
         yaxis_title="Revenue",
+        yaxis=dict(tickformat="$,.0f"),
         legend_title_text="",
-        margin={"l": 20, "r": 20, "t": 30, "b": 20},
+        margin={"l": 20, "r": 20, "t": 50, "b": 20},
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -200,188 +196,79 @@ def main() -> None:
 
     show_kpis(filtered_df)
 
-    st.divider()
+    st.subheader("Monthly Revenue Trend")
+    revenue_trend_chart(filtered_df)
 
-    trend_tab, performance_tab, patient_tab = st.tabs(
-        ["Revenue Trends", "Hospital Performance", "Patient Insights"]
-    )
-
-    with trend_tab:
-        st.subheader("Monthly Revenue Trend")
-        revenue_trend_chart(filtered_df)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            age_revenue = (
-                filtered_df.groupby("Age Category", observed=False)["Billing Amount"]
-                .sum()
-                .reset_index()
-            )
-            fig = px.bar(
-                age_revenue,
-                x="Age Category",
-                y="Billing Amount",
-                title="Revenue by Age Category",
-                color="Age Category",
-                template="plotly_white",
-            )
-            fig.update_layout(showlegend=False, margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            condition_revenue = (
-                filtered_df.groupby("Medical Condition", as_index=False)["Billing Amount"]
-                .sum()
-                .sort_values("Billing Amount", ascending=False)
-            )
-            fig = px.bar(
-                condition_revenue,
-                x="Billing Amount",
-                y="Medical Condition",
-                title="Revenue by Medical Condition",
-                orientation="h",
-                template="plotly_white",
-                color="Billing Amount",
-                color_continuous_scale="Teal",
-            )
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-    with performance_tab:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            hospital_revenue = (
-                filtered_df.groupby("Hospital", as_index=False)["Billing Amount"]
-                .sum()
-                .sort_values("Billing Amount", ascending=False)
-                .head(10)
-            )
-            fig = px.bar(
-                hospital_revenue,
-                x="Billing Amount",
-                y="Hospital",
-                title="Top Hospitals by Billing Revenue",
-                orientation="h",
-                template="plotly_white",
-                color="Billing Amount",
-                color_continuous_scale="Blues",
-            )
-            fig.update_yaxes(categoryorder="total ascending")
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            doctor_revenue = (
-                filtered_df.groupby("Doctor", as_index=False)["Billing Amount"]
-                .sum()
-                .sort_values("Billing Amount", ascending=False)
-                .head(10)
-            )
-            fig = px.bar(
-                doctor_revenue,
-                x="Billing Amount",
-                y="Doctor",
-                title="Top Doctors by Billing Revenue",
-                orientation="h",
-                template="plotly_white",
-                color="Billing Amount",
-                color_continuous_scale="Greens",
-            )
-            fig.update_yaxes(categoryorder="total ascending")
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Detailed Hospital KPI View")
-        hospital_summary = (
-            filtered_df.groupby("Hospital")
-            .agg(
-                Patients=("Name", "count"),
-                Revenue=("Billing Amount", "sum"),
-                Average_Billing=("Billing Amount", "mean"),
-                Average_Length_of_Stay=("Length of Stay", "mean"),
-            )
-            .sort_values("Revenue", ascending=False)
+    col1, col2 = st.columns(2)
+    with col1:
+        age_revenue = (
+            filtered_df.groupby("Age Category", observed=False)["Billing Amount"]
+            .sum()
             .reset_index()
         )
-        st.dataframe(
-            hospital_summary,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Revenue": st.column_config.NumberColumn(format="$%.2f"),
-                "Average_Billing": st.column_config.NumberColumn(format="$%.2f"),
-                "Average_Length_of_Stay": st.column_config.NumberColumn(format="%.2f days"),
-            },
+        fig = px.bar(
+            age_revenue,
+            x="Age Category",
+            y="Billing Amount",
+            title="Revenue by Age Category",
+            color="Age Category",
+            template="plotly_white",
         )
+        fig.update_layout(showlegend=False, margin={"l": 20, "r": 20, "t": 50, "b": 20})
+        st.plotly_chart(fig, use_container_width=True)
 
-    with patient_tab:
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            fig = px.pie(
-                filtered_df,
-                names="Admission Type",
-                title="Admission Type Distribution",
-                hole=0.45,
-                color_discrete_sequence=px.colors.qualitative.Set2,
-            )
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            fig = px.pie(
-                filtered_df,
-                names="Gender",
-                title="Patient Gender Mix",
-                hole=0.45,
-                color_discrete_sequence=px.colors.qualitative.Pastel,
-            )
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col3:
-            insurance_counts = (
-                filtered_df["Insurance Provider"].value_counts().reset_index()
-            )
-            insurance_counts.columns = ["Insurance Provider", "Patients"]
-            fig = px.bar(
-                insurance_counts,
-                x="Insurance Provider",
-                y="Patients",
-                title="Patients by Insurance Provider",
-                template="plotly_white",
-                color="Patients",
-                color_continuous_scale="Oranges",
-            )
-            fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Patient Records")
-        st.dataframe(
-            filtered_df[
-                [
-                    "Name",
-                    "Age",
-                    "Gender",
-                    "Medical Condition",
-                    "Date of Admission",
-                    "Hospital",
-                    "Doctor",
-                    "Insurance Provider",
-                    "Billing Amount",
-                    "Admission Type",
-                    "Length of Stay",
-                ]
-            ].sort_values("Date of Admission", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Billing Amount": st.column_config.NumberColumn(format="$%.2f"),
-                "Date of Admission": st.column_config.DateColumn(format="YYYY-MM-DD"),
-                "Length of Stay": st.column_config.NumberColumn(format="%d days"),
-            },
+    with col2:
+        condition_revenue = (
+            filtered_df.groupby("Medical Condition", as_index=False)["Billing Amount"]
+            .sum()
+            .sort_values("Billing Amount", ascending=False)
         )
+        fig = px.bar(
+            condition_revenue,
+            x="Billing Amount",
+            y="Medical Condition",
+            title="Revenue by Medical Condition",
+            orientation="h",
+            template="plotly_white",
+            color="Billing Amount",
+            color_continuous_scale="Teal",
+        )
+        fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
+        st.plotly_chart(fig, use_container_width=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        hospital_revenue = (
+            filtered_df.groupby("Hospital", as_index=False)["Billing Amount"]
+            .sum()
+            .sort_values("Billing Amount", ascending=False)
+            .head(10)
+        )
+        fig = px.bar(
+            hospital_revenue,
+            x="Billing Amount",
+            y="Hospital",
+            title="Top Hospitals by Billing Revenue",
+            orientation="h",
+            template="plotly_white",
+            color="Billing Amount",
+            color_continuous_scale="Blues",
+        )
+        fig.update_yaxes(categoryorder="total ascending")
+        fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        fig = px.pie(
+            filtered_df,
+            names="Admission Type",
+            title="Admission Type Distribution",
+            hole=0.45,
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig.update_layout(margin={"l": 20, "r": 20, "t": 50, "b": 20})
+        st.plotly_chart(fig, use_container_width=True)
 
 
 if __name__ == "__main__":
